@@ -6,7 +6,7 @@ resource "aws_lb" "web-alb" {
   subnets            = ["subnet-229f2249", "subnet-bae0b3f6"]
 
 
-  enable_deletion_protection = true
+  enable_deletion_protection = false
 
 
   tags = {
