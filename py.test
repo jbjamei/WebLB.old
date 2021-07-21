@@ -1,0 +1,179 @@
+from ssoservice import SSOService
+import json
+import requests
+import time
+
+def get_hostname(token):
+    return '%s.sf-api.com'%(token['subdomain'])
+
+def get_authorization_header(token):
+    return {'Authorization':'Bearer %s'%(token['access_token'])}
+
+def _authenticate(hostname, client_id, client_secret, username, password):
+    """ Authenticate via username/password. Returns json token object.
+    Args:
+    string hostname - hostname like "myaccount.sharefile.com"
+    string client_id - OAuth2 client_id key
+    string client_secret - OAuth2 client_secret key
+    string username - my@user.name
+    string password - my password """
+
+    uri_path = '/oauth/token'
+    params = {'grant_type':'password', 'client_id':client_id, 'client_secret':client_secret,
+            'username':username, 'password':password}
+    url = "https://{}{}".format(hostname, uri_path)
+    response = requests.post(url,params)
+
+    token = None
+    if response.status_code == 200:
+        token = response.json()
+
+    return token
+
+
+class SharefileClientService(SSOService):
+    ''' This group ID comes from Keycloak '''
+    group_id = "b564d18f-5441-4aee-aa8d-598ae14f8c30"
+    name = "Sharefile Client"
+
+    def __init__(self, sharefile_config):
+        super().__init__()
+        self.token = _authenticate(sharefile_config['url'], sharefile_config['sfid'], sharefile_config['secret'], sharefile_config['username'], sharefile_config['password'])
+
+    def list_users(self):
+        uri_path = '/sf/v3/Accounts/Clients'
+        url="https://"+get_hostname(self.token)+uri_path
+        response = requests.get(url, headers=get_authorization_header(self.token))
+        
+        clients = {}
+        if response.status_code == 200:
+            clients = response.json()
+        client_set = set()
+        for client in clients['value']:
+            client_set.add(client['Email'])
+        return client_set
+    
+    def find_user_id(self, email):
+        uri_path = '/sf/v3/Users?emailaddress={}'.format(email)
+        url="https://"+get_hostname(self.token)+uri_path
+        response = requests.get(url, headers=get_authorization_header(self.token))
+
+        if response.status_code == 200:
+            return response.json()["Id"]
+        else:
+            return None
+    
+    def delete_user(self, email):
+        id = self.find_user_id(email)
+        uri_path = '/sf/v3/Users/Clients/BulkDelete'
+        url="https://"+get_hostname(self.token)+uri_path
+        payload = {
+            'UserIds': [id]
+        }
+        response = requests.post(url, data=payload, headers=get_authorization_header(self.token))
+        if response.status_code == 204:
+            return 200
+
+
+    def create_user(self, email, first_name, last_name, org):
+        user_definition = {
+            'FirstName': first_name,
+            'LastName': last_name,
+            'Email': email,
+            'Company': org,
+            'Preferences': {
+                'CanResetPassword': False,
+                'CanViewMySettings': False
+            },
+            'notify': False,
+            'ifNecessary': True
+        }
+        uri_path = '/sf/v3/Users'
+        url="https://"+get_hostname(self.token)+uri_path
+
+        response = requests.post(url, data=user_definition, headers=get_authorization_header(self.token))
+        return response.status_code
+
+class SharefileEmployeeService(SSOService):
+    ''' This group ID comes from Keycloak '''
+    group_id = "6dfe6798-7880-4259-9a2d-6177cd856c47"
+    name = "Sharefile Employee"
+
+    def __init__(self, sharefile_config):
+        super().__init__()
+        self.token = _authenticate(sharefile_config['url'], sharefile_config['sfid'], sharefile_config['secret'], sharefile_config['username'], sharefile_config['password'])
+
+    def list_users(self):
+        uri_path = '/sf/v3/Accounts/Employees'
+        url="https://"+get_hostname(self.token)+uri_path
+        response = requests.get(url, headers=get_authorization_header(self.token))
+        
+        users = {}
+        if response.status_code == 200:
+            users = response.json()
+        user_set = set()
+        for user in users['value']:
+            if user['Email'].lower() == "jasonk@appliedtrust.com":
+                continue
+            user_set.add(user['Email'].lower())
+        return user_set
+    
+    def find_user_id(self, email):
+        uri_path = '/sf/v3/Users?emailaddress={}'.format(email)
+        url="https://"+get_hostname(self.token)+uri_path
+        response = requests.get(url, headers=get_authorization_header(self.token))
+
+        if response.status_code == 200:
+            return response.json()["Id"]
+        else:
+            return None
+    
+    def delete_user(self, email):
+        id = self.find_user_id(email)
+        uri_path = '/sf/v3/Users({})?completely=true'.format(id)
+        url="https://"+get_hostname(self.token)+uri_path
+        response = requests.delete(url, headers=get_authorization_header(self.token))
+        if response.status_code == 204:
+            return 200
+
+
+    def create_user(self, email, first_name, last_name, org):
+        user_definition = { 
+            "Email":email, 
+            "FirstName":first_name, 
+            "LastName": last_name, 
+            "Company": org, 
+            "Preferences": 
+            { 
+                "CanResetPassword": False, 
+                "CanViewMySettings": True
+            }, 
+            "DefaultZone": 
+            { 
+                "Id":"zoneid"
+            }, 
+            "IsAdministrator": False, 
+            "CanCreateFolders": True, 
+            "CanUseFileBox": True, 
+            "CanManageUsers": False, 
+            "Roles": [ 
+                    "CanManageMySettings",
+                    "CanUseFileBox", "CanCreateFolders", "CanUseDropBox", 
+            ] 
+        } 
+        uri_path = '/sf/v3/Users/AccountUser'
+        url="https://"+get_hostname(self.token)+uri_path
+
+        response = requests.post(url, data=user_definition, headers=get_authorization_header(self.token))
+        return response.status_code
+
+    def _add_user_to_group(self, group_id, id):
+        ''' THIS CODE IS BROKEN, DO NOT USE '''
+        uri_path = '/sf/v3/Groups({})/Contacts'.format(group_id)
+        url="https://"+get_hostname(self.token)+uri_path
+        payload = [{"Id": id}]
+        print("Waiting 20 seconds for the sharefile API to catch up...")
+        time.sleep(20)
+        response = requests.post(url, data=json.dumps(payload), headers=get_authorization_header(self.token))
+        print(json.dumps(response.json()))
+        return response.status_code
